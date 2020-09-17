@@ -1,0 +1,89 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: logging-consumer
+  rabbitmq:
+    username: guest
+    password: guest
+    host: 192.168.175.200
+    port: 5673
+  # 绑定失败时重试间隔
+  cloud:
+    stream:
+      # 声明该服务的数量以及索引
+      # 当扩展springCloudStream应用程序时，每个实例都可以接收关于同一应用程序的其他实例的数量以及它自己的实例索引是什么的信息。
+      # 用于分区(典型的有状态服务)
+      instance-count: 1
+      instance-index: 0
+      # 使用函数式编程模型时(@Bean标注在Supplier, Consumer, Function上时), 必须指定输入输出函数的名称(如果整个应用只有一个,可以不指定,但是不推荐这么做; 既可以使用";"分隔多个, 还可以使用"|"连接多个)
+      function:
+        definition: emitPerson;logPerson;destinationAsPayload
+        # 测试给绑定名称起别名
+        # warning: 由于所有后续配置属性都将使用显式绑定名称，因此必须始终引用此“bindings”属性来关联它实际对应的函数。
+        # 一般不建议使用别名, 只在多关联函数时, 推荐使用
+        bindings:
+          logPerson-in-0: testPerson2Input
+      # 手动指定source名称, 用于触发框架创建source
+      source: toStream
+      # 绑定重试间隔: 3秒
+      binding-retry-interval: 3
+      # 在springCloudStream中, 发布-订阅模式是持久性的.
+      bindings:
+        destinationAsPayload-in-0:
+          destination: dynamicRouterInput
+        emitPerson-out-0:
+          # 指定内容类型: 默认是application/json
+          # 设定优先级: Header标注的 > binding声明的 > default(application/json)
+          # 当MessageHandler返回值不是消息时，新消息是用返回值作为有效负载构建的，同时从输入消息继承头
+          content-type: application/json
+          destination: testPerson2
+          # 分区配置(生产者端)
+          producer:
+            # 声明分区数量
+            partition-count: 1
+            # 声明分区键表达式(用来分区)
+            partitionKeyExpression: payload.id % 2 == 0
+        testPerson2Input:
+          destination: testPerson2
+          # 声明消费者组, 这样, 在集群模式下, 消息不会被重复消费. 且多个消费者组可以消费同一个目的地, 实现了topic模型.
+          # warning: spring cloud stream采用的是pub-sub模式(可同时实现队列和主题). 对于队列, 只需要设定该通道的消费者组只有一个即可实现.
+          # 如果不指定, 则框架自动声明一个匿名消费者组, 组中只有该服务一个成员
+          group: loggingPerson
+          # 分区配置(消费者端)
+          consumer:
+            partitioned: true
+        # 测试多输入, 即: 一个messageHandler(生产者和消费者的另外一种称呼)同时处理来自多个目的地的消息
+        logPerson-in-1:
+          destination: testPerson1
+          group: loggingPerson
+        toStream-out-0:
+          destination: testPerson1
+      # Supplier类型的bean, 框架是自动调用其中的get()方法, 下面是轮询的配置属性
+      poller:
+        fixed-delay: 3000
+        max-messages-per-poll: 1
+      # 错误处理:
+      #     一. 错误发生后, 框架会再次尝试重新消费(默认3次).
+      #     二. 如果没有特意配置, 系统默认会丢弃掉该消息.
+      #     三. 可配置死信队列(如下所示)
+      rabbit:
+        bindings:
+          testPerson2Input:
+            consumer:
+              # 手动ACK 不开启自动ACK模式,目的是防止重复消费 默认为 auto
+              # acknowledge-mode: MANUAL
+              # 开启死信队列绑定, 消息消费发生异常时, 会提交到死信队列
+              auto-bind-dlq: true
+# 开放绑定端点, 用于绑定可视化和控制
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+# TODO 是否能支持延时队列, 严格的顺序消费?
+# TODO 手动ACK支持,动态路由,持久消息(默认就是),死信队列处理(参考reference) 批量消费(Batch Consumers), 轮询消费者(暂时无法解决, 因为使用的还是老式的注解版),多绑定器共存(配置多个数据源多种类型的绑定器)
+# TODO ErrorMessage requeue retry concurrency 属性: errorChannelEnabled
