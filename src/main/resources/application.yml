@@ -69,10 +69,16 @@ spring:
       #     三. 可配置死信队列(如下所示)
       rabbit:
         bindings:
+          emitPerson-out-0:
+            producer:
+              #生产者端声明使用延时队列, 依赖于rabbitmq的延时队列插件
+              # FIXME 由于此时获取到的负载是byte[], 无法使用此方式
+              #delay-expression: payload.delayTime
+              delayed-exchange: true
           testPerson2Input:
             consumer:
               # 手动ACK 不开启自动ACK模式,目的是防止重复消费 默认为 auto
-              # acknowledge-mode: MANUAL
+              acknowledge-mode: MANUAL
               # 开启死信队列绑定, 消息消费发生异常时, 会提交到死信队列
               auto-bind-dlq: true
 # 开放绑定端点, 用于绑定可视化和控制
@@ -85,5 +91,5 @@ management:
     health:
       show-details: always
 # TODO 是否能支持延时队列, 严格的顺序消费?
-# TODO 手动ACK支持,动态路由,持久消息(默认就是),死信队列处理(参考reference) 批量消费(Batch Consumers), 轮询消费者(暂时无法解决, 因为使用的还是老式的注解版),多绑定器共存(配置多个数据源多种类型的绑定器)
+# 手动ACK支持,动态路由,持久消息(默认就是),死信队列处理(参考reference) 批量消费(Batch Consumers), 轮询消费者(暂时无法解决, 因为使用的还是老式的注解版),多绑定器共存(配置多个数据源多种类型的绑定器)
 # TODO ErrorMessage requeue retry concurrency 属性: errorChannelEnabled

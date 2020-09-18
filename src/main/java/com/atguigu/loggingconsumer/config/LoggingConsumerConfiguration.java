@@ -1,16 +1,22 @@
 package com.atguigu.loggingconsumer.config;
 
+import com.rabbitmq.client.Channel;
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.integration.support.MessageBuilder;
 import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageHeaders;
 
+import java.io.IOException;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+@Slf4j
 @Configuration
 public class LoggingConsumerConfiguration {
 
@@ -33,9 +39,28 @@ public class LoggingConsumerConfiguration {
     @Bean
     public Consumer<Message<Person>> logPerson() {
         return message -> {
-            System.out.println("Received: " + message.getPayload());
-            // FIXME 手动ACK
+                System.out.println("Received: " + message.getPayload());
+                MessageHeaders headers = message.getHeaders();
+                System.out.println(headers);
+                System.out.println(headers.get(AmqpHeaders.DELAY, Long.class));
+                // TODO 注意业务代码要用try-catch包起来,防止异常导致ACK失败, 卡死mq
+                if (headers.containsKey(AmqpHeaders.CHANNEL)){
+                    // 暂定为手动ack
+                   Channel channel = headers.get(AmqpHeaders.CHANNEL, Channel.class);
+                   Long deliverTag = headers.get(AmqpHeaders.DELIVERY_TAG, Long.class);
+                    assert channel != null;
+                    assert  deliverTag != null;
+                    try {
+                        channel.basicAck(deliverTag, false);
+                        System.out.println("手动ack成功...");
+                    } catch (IOException e) {
+                        log.error("[logPerson consumer] 消费异常, errorMessage={}", e.getMessage(), e);
+                    }
+                }
 
+//            assert accessor != null;
+//            Long deliveryTag = accessor.getDeliveryTag();
+//            System.err.println("deliveryTag: " + deliveryTag);
             // 仅能用于Polled Consumers
             // Objects.requireNonNull(StaticMessageHeaderAccessor.getAcknowledgmentCallback(message)).acknowledge();
             // 测试消息失败时的错误处理: DLQ
@@ -59,14 +84,25 @@ public class LoggingConsumerConfiguration {
             Person person = new Person();
             person.setName(UUID.randomUUID().toString());
             person.setId((int) (Math.random() * 100));
+            person.setDelayTime(6500L);
             System.err.println("Emit: " + person);
-            return MessageBuilder.withPayload(person).build();
+            return MessageBuilder.withPayload(person).setHeader("x-delay", 6500L).build();
         };
     }
 
     @Data
     public static class Person {
+        /**
+         * 姓名
+         */
         private String name;
+        /**
+         * id
+         */
         private Integer id;
+        /**
+         * 延迟毫秒数
+         */
+        private long delayTime;
     }
 }
